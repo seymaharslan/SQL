@@ -1,0 +1,78 @@
+with 
+pieces_created as (
+    select 
+        to_varchar(
+            convert_timezone(
+                'america/los_angeles',
+                date_trunc('minute', vp.created_at)
+            ),
+            'mm/dd/yyyy hh24:mi:ss'
+        ) as event_occured_at_pst,
+        vp.order_id,
+        c.company_name,
+        'piece(s) created' as event_type,
+        count(distinct vp.field_value_to) as pieces_created,
+        null as street_from,
+        null as street_to
+    from 
+        versions.versions_parsed vp
+        left join reporting.orders o on vp.order_id = o.order_id
+        left join reporting.companies c on o.company_id = c.company_id
+        left join pt.users u on vp.user_id = u.id
+    where 1=1
+        and u.email ilike '%taskus%'
+        and vp.created_at >= dateadd('hour', -1, current_timestamp)
+        and o.service_type = 'nfo'
+        and vp.item_type = 'piece'
+        and vp.event = 'create'
+        and vp.field_name = 'id'
+    group by 
+        1, 2, 3, 4
+),
+addresses_updated as (
+    select 
+        to_varchar(
+            convert_timezone(
+                'america/los_angeles',
+                date_trunc('minute', vp.created_at)
+            ),
+            'mm/dd/yyyy hh24:mi:ss'
+        ) as event_occured_at_pst,
+        vp.order_id,
+        c.company_name,
+        case
+            when vp.field_value_to = o.pickup_street then 'addresses changed - pickup'
+            when vp.field_value_to = o.delivery_street then 'addresses changed - delivery'
+            else 'not final address - addresses changed prior to segment end'
+        end as event_type,
+        null as pieces_created,
+        vp.field_value_from as street_from,
+        vp.field_value_to as street_to
+    from 
+        versions.versions_parsed vp
+        left join reporting.orders o on vp.order_id = o.order_id
+        left join reporting.companies c on o.company_id = c.company_id
+        left join pt.users u on vp.user_id = u.id
+    where 1=1
+        and u.email ilike '%taskus%'
+        and vp.created_at >= dateadd('day', -7, current_timestamp)
+        and o.service_type = 'nfo'
+        and vp.item_type = 'address'
+        and vp.event = 'update'
+        and vp.field_name = 'street'
+)
+
+select 
+    *,
+    0 as validated
+from 
+    addresses_updated
+union all
+select 
+    *,
+    0 as validated
+from 
+    pieces_created
+order by
+    order_id desc
+;
